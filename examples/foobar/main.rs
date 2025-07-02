@@ -2,15 +2,19 @@
 
 use std::{sync::Arc, time::SystemTime};
 
-use binding::{Sampler2d, Texture2d};
-use buffers::Vertex3dUV;
-use camera::{Camera, CameraDirection};
-use cgmath::*;
-use color::Rgba;
-use mesh::{Mesh3D, Quad};
-use object::Object;
+use tbn_engine::binding::{Sampler2d, TextureView2d};
+use tbn_engine::buffers::Vertex3dUV;
+use tbn_engine::camera::{Camera, CameraDirection};
+use tbn_engine::color::Rgba;
+use tbn_engine::material::{self, AsMaterial};
+use tbn_engine::mesh::{Mesh3D, Quad};
+use tbn_engine::object::Object;
+use tbn_engine::surface::{Surface, SurfaceView, WindowSurface};
+
 use pollster::FutureExt as _;
-use surface::{Surface, SurfaceView, WindowSurface};
+
+use cgmath::*;
+
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -18,26 +22,19 @@ use winit::{
     window::{Window, WindowId},
 };
 
-pub mod binding;
-pub mod buffers;
-pub mod camera;
-pub mod color;
-pub mod material;
-pub mod mesh;
-pub mod object;
-pub mod surface;
-
+#[allow(dead_code)]
 struct Image<Data: AsRef<[u8]>> {
     format: wgpu::TextureFormat,
     size: Vector2<u32>,
     data: Data,
 }
 
+#[allow(dead_code)]
 fn test_image() -> Image<impl AsRef<[u8]>> {
     Image {
         format: wgpu::TextureFormat::Rgba8Unorm,
         size: vec2(256, 256),
-        data: include_bytes!("../image.bin"),
+        data: include_bytes!("./image.bin"),
     }
 }
 
@@ -83,17 +80,59 @@ const CUBE_INDICIES: [u32; 36] = [
     20, 21, 22, 22, 23, 20, // Down (-Y)
 ];
 
+struct PostProcessMaterial {
+    sampler: Sampler2d,
+    color_texture: TextureView2d,
+    depth_texture: TextureView2d,
+}
+
+tbn_engine::impl_as_bind_group! {
+    PostProcessMaterial {
+        0 => sampler,
+        1 => color_texture,
+        2 => depth_texture,
+    }
+}
+
+impl PostProcessMaterial {
+    pub fn create(device: &wgpu::Device, surface: &Surface) -> Self {
+        let color_texture = surface.color_texture().view(Default::default());
+        let depth_texture = surface
+            .depth_stencil_texture()
+            .view(wgpu::TextureSampleType::Depth);
+        let sampler = Sampler2d::create(
+            device,
+            wgpu::AddressMode::ClampToEdge,
+            wgpu::FilterMode::Linear,
+            wgpu::FilterMode::Linear,
+        );
+        Self {
+            sampler,
+            color_texture,
+            depth_texture,
+        }
+    }
+}
+
+impl AsMaterial for PostProcessMaterial {
+    fn create_fragment_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
+        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(include_str!("./postprocess.wgsl").into()),
+        })
+    }
+}
+
 struct State {
     device: wgpu::Device,
     queue: wgpu::Queue,
     window: Arc<Window>,
     window_surface: WindowSurface,
     /// The render result before post-processing.
-    scene_surface: Surface,
+    render_result_0: Surface,
     /// The quad used for rendering post-processed textures.
-    quad: Object<Quad, material::Textured>,
+    postprocess_quad: Object<Quad, PostProcessMaterial>,
     camera: Camera,
-    test_quad: Object<Quad, material::Textured>,
     test_cube: Object<Mesh3D, material::UniformFill>,
 }
 
@@ -111,29 +150,21 @@ impl State {
 
         let window_surface = WindowSurface::new(Arc::clone(&window), &instance, &adapter, &device);
 
-        let staging_surface = Self::create_staging_surface(&device, window_surface.physical_size());
+        let render_result_0 = Self::create_staging_surface(&device, window_surface.physical_size());
 
         let camera = Camera::create(
             &device,
             point3(0.0, 0.0, -1000.0),
             vec3(0.0, 1.0, 0.0),
             CameraDirection::LookAt(point3(0.0, 0.0, 0.0)),
-            Deg(70.0),
+            Deg(50.0),
             1.0,
             100000.0,
         );
 
-        let staging_quad_material = Arc::new(material::Textured::create(
-            &device,
-            staging_surface.color_texture().view(Default::default()),
-            Sampler2d::create(
-                &device,
-                wgpu::AddressMode::ClampToEdge,
-                wgpu::FilterMode::Linear,
-                wgpu::FilterMode::Linear,
-            ),
-        ));
-        let staging_quad = Object::create(
+        let staging_quad_material =
+            Arc::new(PostProcessMaterial::create(&device, &render_result_0));
+        let postprocess_quad = Object::create(
             &device,
             &camera,
             window_surface.format(),
@@ -141,34 +172,13 @@ impl State {
             staging_quad_material,
         );
 
-        let test_quad = {
-            let image = test_image();
-            let texture = Texture2d::create_init(
-                &device,
-                &queue,
-                image.size,
-                image.format,
-                image.data.as_ref(),
-            );
-            let texture_view = texture.view(Default::default());
-            let sampler = Sampler2d::create(
-                &device,
-                wgpu::AddressMode::ClampToEdge,
-                wgpu::FilterMode::Nearest,
-                wgpu::FilterMode::Nearest,
-            );
-            let material = Arc::new(material::Textured::create(&device, texture_view, sampler));
-            let mesh = Quad::create(&device);
-            Object::create(&device, &camera, staging_surface.format(), mesh, material)
-        };
-
         let test_cube = {
             let material = Arc::new(material::UniformFill::create(&device));
             material
                 .fill_color
                 .write(Rgba::new(0.7, 0.4, 1.0, 1.0), &queue);
             let mesh = Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES);
-            Object::create(&device, &camera, staging_surface.format(), mesh, material)
+            Object::create(&device, &camera, render_result_0.format(), mesh, material)
         };
 
         State {
@@ -176,10 +186,9 @@ impl State {
             device,
             queue,
             window_surface,
-            scene_surface: staging_surface,
-            quad: staging_quad,
+            render_result_0,
+            postprocess_quad,
             camera,
-            test_quad,
             test_cube,
         }
     }
@@ -194,7 +203,7 @@ impl State {
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.window_surface.resized(new_size, &self.device);
-        self.scene_surface =
+        self.render_result_0 =
             Self::create_staging_surface(&self.device, self.window_surface.physical_size());
     }
 
@@ -212,19 +221,11 @@ impl State {
             .update_projection_uniform(surface.size_f32(), &self.queue);
         render_pass.use_camera(&self.camera);
 
-        // Draw the test quad.
-        let size = 100.0;
-        let position = vec3(-size / 2.0, -size / 2.0, 0.0);
-        let model = Matrix4::from_translation(position) * Matrix4::from_scale(size);
-        self.test_quad.set_model(model, &self.camera, &self.queue);
-        self.test_quad.draw(&mut render_pass);
-
         // Draw the cube.
         let size = 100.0;
-        let position = vec3(240.0 - size / 2.0, -size / 2.0, -size / 2.0);
-        let model = Matrix4::from_translation(position)
-            * Matrix4::from_angle_x(Deg(45.0))
+        let model = Matrix4::from_angle_x(Deg(45.0))
             * Matrix4::from_angle_y(Deg(30.0))
+            * Matrix4::from_translation(-0.5 * vec3(size, size, size))
             * Matrix4::from_scale(size);
         self.test_cube.set_model(model, &self.camera, &self.queue);
         self.test_cube.draw(&mut render_pass);
@@ -233,7 +234,7 @@ impl State {
     }
 
     fn render(&mut self) {
-        self.draw(self.scene_surface.view());
+        self.draw(self.render_result_0.view());
         self.window_surface.frame(|surface| {
             let mut render_pass = surface.render_pass(&self.device);
 
@@ -246,27 +247,22 @@ impl State {
                 -1.0,
                 1.0,
             );
+            camera.update_projection_uniform(self.window_surface.physical_size_f32(), &self.queue);
 
             render_pass.use_camera(&camera);
 
-            let material = material::Textured::create(
-                &self.device,
-                self.scene_surface.color_texture().view(Default::default()),
-                Sampler2d::create(
-                    &self.device,
-                    wgpu::AddressMode::ClampToEdge,
-                    wgpu::FilterMode::Linear,
-                    wgpu::FilterMode::Linear,
-                ),
-            );
-            material.gamma().write(2.2, &self.queue);
-            self.quad.update_material(&self.device, Arc::new(material));
-            let model = Matrix4::from_translation(vec3(-1.0, -1.0, 0.0)) * Matrix4::from_scale(2.0);
-            self.quad
+            let material = PostProcessMaterial::create(&self.device, &self.render_result_0);
+            self.postprocess_quad
+                .update_material(&self.device, Arc::new(material));
+            let size = self.window_surface.physical_size_f32();
+            let size_half = size / 2.0;
+            let model = Matrix4::from_translation(-size_half.extend(0.0))
+                * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0);
+            self.postprocess_quad
                 .mesh()
                 .model_view
                 .write(model.into(), &self.queue);
-            self.quad.draw(&mut render_pass);
+            self.postprocess_quad.draw(&mut render_pass);
 
             render_pass.finish(&self.queue);
         });

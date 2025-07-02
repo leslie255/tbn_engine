@@ -3,6 +3,8 @@ name = "tbn_engine"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+
 [dependencies]
 bytemuck = { version = "1.23", features = ["derive"] }
 cgmath = "0.18" 

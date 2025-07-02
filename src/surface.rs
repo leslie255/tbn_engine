@@ -140,7 +140,7 @@ impl Surface {
     pub fn depth_stencil_texture(&self) -> &Texture2d {
         &self.depth_stencil_texture
     }
-    
+
     pub fn view(&self) -> SurfaceView {
         SurfaceView {
             texture: self.color_texture().view(Default::default()),

@@ -36,7 +36,7 @@ macro_rules! impl_as_bind_group {
                 ]
             }
         }
-        impl_as_bind_group! { $($tts)* }
+        $crate::impl_as_bind_group! { $($tts)* }
     };
     () => {}
 }
