@@ -104,6 +104,10 @@ impl WindowSurface {
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
     }
+
+    pub fn depth_stencil_format(&self) -> wgpu::TextureFormat {
+        self.depth_stencil_texture.format()
+    }
 }
 
 /// A target for drawing.
@@ -143,27 +147,35 @@ impl Surface {
 
     pub fn view(&self) -> SurfaceView {
         SurfaceView {
-            texture: self.color_texture().view(Default::default()),
-            depth_stencil_texture: self.depth_stencil_texture.view(Default::default()),
+            color_texture: self.color_texture().view(Default::default()),
+            depth_stencil_texture: self.depth_stencil_texture.view(wgpu::TextureSampleType::Depth),
         }
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
     }
+
+    pub fn size(&self) -> Vector2<u32> {
+        self.color_texture().size()
+    }
+
+    pub fn size_f32(&self) -> Vector2<f32> {
+        self.size().map(|u| u as f32)
+    }
 }
 
 /// View of a surface.
 #[derive(Debug, Clone)]
 pub struct SurfaceView {
-    texture: TextureView2d,
+    color_texture: TextureView2d,
     depth_stencil_texture: TextureView2d,
 }
 
 impl SurfaceView {
     pub fn new(texture: TextureView2d, depth_stencil_texture: TextureView2d) -> Self {
         Self {
-            texture,
+            color_texture: texture,
             depth_stencil_texture,
         }
     }
@@ -174,7 +186,7 @@ impl SurfaceView {
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.texture.wgpu_texture_view(),
+                    view: self.color_texture.wgpu_texture_view(),
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -200,15 +212,41 @@ impl SurfaceView {
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.texture.format()
+        self.color_texture().format()
+    }
+
+    pub fn depth_stencil_format(&self) -> wgpu::TextureFormat {
+        self.depth_stencil_texture().format()
     }
 
     pub fn size(&self) -> Vector2<u32> {
-        self.texture.size()
+        self.color_texture.size()
     }
 
     pub fn size_f32(&self) -> Vector2<f32> {
-        self.texture.size().map(|u| u as f32)
+        self.color_texture.size().map(|u| u as f32)
+    }
+
+    pub fn color_texture(&self) -> &TextureView2d {
+        &self.color_texture
+    }
+
+    pub fn depth_stencil_texture(&self) -> &TextureView2d {
+        &self.depth_stencil_texture
+    }
+
+    /// Returns the color texture view (`.0`) and the depth stencil texture view (`.1`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// fn f(surface_view: SurfaceView) {
+    /// let (color_texture, depth_stencil_texture) =
+    ///     surface_view.into_color_depth_stencil_textures();
+    /// }
+    /// ```
+    pub fn into_color_depth_stencil_textures(self) -> (TextureView2d, TextureView2d) {
+        (self.color_texture, self.depth_stencil_texture)
     }
 }
 

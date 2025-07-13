@@ -1,6 +1,9 @@
 use cgmath::*;
 
-use crate::{binding::{self, UniformBuffer}, impl_as_bind_group};
+use crate::{
+    binding::{self, UniformBuffer},
+    impl_as_bind_group,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CameraDirection {
@@ -67,20 +70,25 @@ impl Camera {
             .write(self.projection_matrix(canvas_size).into(), queue);
     }
 
+    /// Set the projection uniform to a custom value
+    pub fn update_projection_uniform_with(&self, projection: Matrix4<f32>, queue: &wgpu::Queue) {
+        self.projection.write(projection.into(), queue);
+    }
+
     /// Use this camera for subsequent draw calls in this render pass.
     pub fn use_(&self, render_pass: &mut wgpu::RenderPass) {
         render_pass.set_bind_group(0, self.wgpu_bind_group(), &[]);
     }
 
     pub fn projection_matrix(&self, canvas_size: Vector2<f32>) -> Matrix4<f32> {
-        if self.fov.is_zero() {
+        if self.fov.0.is_zero() {
             cgmath::ortho(
                 -canvas_size.x / 2.0,
                 canvas_size.x / 2.0,
                 -canvas_size.y / 2.0,
                 canvas_size.y / 2.0,
-                -1.0,
-                1.0,
+                self.near,
+                self.far,
             )
         } else {
             cgmath::perspective(self.fov, canvas_size.x / canvas_size.y, self.near, self.far)

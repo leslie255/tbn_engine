@@ -9,6 +9,8 @@ edition = "2024"
 bytemuck = { version = "1.23", features = ["derive"] }
 cgmath = "0.18" 
 env_logger = "0.11"
+index_vec = "0.1.4"
+obj = "0.10.2"
 pollster = "0.4"
 wgpu = "25"
 winit = "0.30.8" 

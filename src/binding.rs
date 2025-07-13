@@ -18,18 +18,18 @@ pub trait AsBindGroup {
 #[macro_export]
 macro_rules! impl_as_bind_group {
     ($T:path { $($binding_id:literal => $field:ident),* $(,)? } $($tts:tt)*) => {
-        impl $crate::binding::AsBindGroup for $T {
+        impl $crate::AsBindGroup for $T {
             fn bind_group_layout_entries(&self) -> Vec<wgpu::BindGroupLayoutEntry> {
-                std::vec![
-                    $($crate::binding::Bindable::bind_group_layout_entry(
+                ::std::vec![
+                    $($crate::Bindable::bind_group_layout_entry(
                         &self.$field,
                         $binding_id,
                     )),*
                 ]
             }
             fn bind_group_entries(&self) -> Vec<wgpu::BindGroupEntry> {
-                std::vec![
-                    $($crate::binding::Bindable::bind_group_entry(
+                ::std::vec![
+                    $($crate::Bindable::bind_group_entry(
                         &self.$field,
                         $binding_id,
                     )),*
@@ -133,7 +133,7 @@ pub struct Texture2d {
 }
 
 impl Texture2d {
-    fn extend(size: Vector2<u32>) -> wgpu::Extent3d {
+    fn extent(size: Vector2<u32>) -> wgpu::Extent3d {
         wgpu::Extent3d {
             width: size.x,
             height: size.y,
@@ -149,7 +149,7 @@ impl Texture2d {
     ) -> Self {
         let wgpu_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
-            size: Self::extend(size),
+            size: Self::extent(size),
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -176,7 +176,7 @@ impl Texture2d {
         let usage = TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING;
         let descriptor = wgpu::TextureDescriptor {
             label: None,
-            size: Self::extend(size),
+            size: Self::extent(size),
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -292,11 +292,11 @@ impl Bindable for TextureView2d {
 }
 
 #[derive(Debug, Clone)]
-pub struct Sampler2d {
+pub struct Sampler {
     wgpu_sampler: wgpu::Sampler,
 }
 
-impl Sampler2d {
+impl Sampler {
     pub fn create(
         device: &wgpu::Device,
         address_mode: wgpu::AddressMode,
@@ -325,12 +325,65 @@ impl Sampler2d {
     }
 }
 
-impl Bindable for Sampler2d {
+impl Bindable for Sampler {
     fn bind_group_layout_entry(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
         wgpu::BindGroupLayoutEntry {
             binding,
             visibility: ShaderStages::all(),
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        }
+    }
+
+    fn bind_group_entry(&self, binding: u32) -> wgpu::BindGroupEntry {
+        wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Sampler(self.wgpu_sampler()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ComparingSampler {
+    wgpu_sampler: wgpu::Sampler,
+}
+
+impl ComparingSampler {
+    pub fn create(
+        device: &wgpu::Device,
+        address_mode: wgpu::AddressMode,
+        mag_filter: wgpu::FilterMode,
+        min_filter: wgpu::FilterMode,
+        compare: wgpu::CompareFunction,
+    ) -> Self {
+        let wgpu_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: address_mode,
+            address_mode_v: address_mode,
+            address_mode_w: address_mode,
+            mag_filter,
+            min_filter,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 0.0,
+            compare: Some(compare),
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+        Self { wgpu_sampler }
+    }
+
+    pub fn wgpu_sampler(&self) -> &wgpu::Sampler {
+        &self.wgpu_sampler
+    }
+}
+
+impl Bindable for ComparingSampler {
+    fn bind_group_layout_entry(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+        wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: ShaderStages::all(),
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
             count: None,
         }
     }

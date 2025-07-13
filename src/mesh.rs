@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     binding::{AsBindGroup, UniformBuffer},
     buffers::{Index, IndexBuffer, Vertex, Vertex2d, Vertex3dUV, VertexBuffer},
@@ -6,7 +8,7 @@ use crate::{
 
 use cgmath::*;
 
-pub trait AsMesh: AsBindGroup {
+pub trait AsMesh: AsBindGroup + Sized + 'static {
     type Vertex: Vertex;
     type Index: Index;
 
@@ -20,6 +22,36 @@ pub trait AsMesh: AsBindGroup {
     /// The model-view matrix.
     /// `None` if this mesh doesn't use a traditional model-view matrix setup.
     fn model_view(&self) -> Option<&UniformBuffer<[[f32; 4]; 4]>>;
+
+    fn as_arc_dyn(self: Arc<Self>) -> Arc<dyn DynMesh> {
+        self
+    }
+}
+
+/// Type-erased, dyn-compatible form of the mesh trait.
+pub trait DynMesh {
+    fn vertex_buffer(&self) -> &wgpu::Buffer;
+    fn index_buffer(&self) -> &wgpu::Buffer;
+    fn index_buffer_length(&self) -> u32;
+    fn model_view(&self) -> Option<&wgpu::Buffer>;
+}
+
+impl<T: AsMesh> DynMesh for T {
+    fn vertex_buffer(&self) -> &wgpu::Buffer {
+        AsMesh::vertex_buffer(self).wgpu_buffer()
+    }
+
+    fn index_buffer(&self) -> &wgpu::Buffer {
+        AsMesh::index_buffer(self).wgpu_buffer()
+    }
+
+    fn index_buffer_length(&self) -> u32 {
+        AsMesh::index_buffer(self).length()
+    }
+
+    fn model_view(&self) -> Option<&wgpu::Buffer> {
+        AsMesh::model_view(self).map(UniformBuffer::wgpu_buffer)
+    }
 }
 
 /// A quad in NDC space that ignores camera matrices.

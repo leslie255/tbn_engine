@@ -39,7 +39,7 @@ impl<T: Vertex> VertexBuffer<T> {
         self.wgpu_buffer.slice(bounds)
     }
 
-    pub fn layout(&self) -> wgpu::VertexBufferLayout {
+    pub fn layout(&self) -> wgpu::VertexBufferLayout<'static> {
         T::LAYOUT
     }
 }

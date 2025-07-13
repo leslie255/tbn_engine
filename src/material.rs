@@ -1,5 +1,5 @@
 use crate::{
-    binding::{AsBindGroup, Sampler2d, TextureView2d, UniformBuffer},
+    binding::{AsBindGroup, Sampler, TextureView2d, UniformBuffer},
     color::Rgba,
     impl_as_bind_group,
 };
@@ -91,7 +91,7 @@ impl AsMaterial for SdfCircle {
 #[derive(Debug, Clone)]
 pub struct Textured {
     texture_view: TextureView2d,
-    sampler: Sampler2d,
+    sampler: Sampler,
     gamma: UniformBuffer<f32>,
 }
 
@@ -104,7 +104,7 @@ impl_as_bind_group! {
 }
 
 impl Textured {
-    pub fn create(device: &wgpu::Device, texture_view: TextureView2d, sampler: Sampler2d) -> Self {
+    pub fn create(device: &wgpu::Device, texture_view: TextureView2d, sampler: Sampler) -> Self {
         Self {
             texture_view,
             sampler,
@@ -116,7 +116,7 @@ impl Textured {
         &self.texture_view
     }
 
-    pub fn sampler(&self) -> &Sampler2d {
+    pub fn sampler(&self) -> &Sampler {
         &self.sampler
     }
 
