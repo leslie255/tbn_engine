@@ -99,8 +99,7 @@ impl State {
         let window_surface = WindowSurface::new(Arc::clone(&window), &instance, &adapter, &device);
 
         let y = 180.0;
-        let camera = Camera::create(
-            &device,
+        let camera = Camera::new(
             point3(0.0, y, 0.0),
             vec3(0.0, 1.0, 0.0),
             CameraDirection::LookAt(point3(0.0, y, 0.0)),
@@ -110,6 +109,7 @@ impl State {
         );
 
         let mut scene = Scene::new(
+            &device,
             camera,
             window_surface.format(),
             window_surface.depth_stencil_format(),
@@ -194,9 +194,6 @@ impl State {
             // Update camera position.
             self.scene.camera_mut().position.x = (f64::cos(t) as f32) * 400.0;
             self.scene.camera_mut().position.z = (f64::sin(t) as f32) * 400.0;
-            self.scene
-                .camera_mut()
-                .update_projection_uniform(surface.size_f32(), &self.queue);
 
             // Ground.
             let camera_far = self.scene.camera().far;

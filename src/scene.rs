@@ -1,10 +1,14 @@
-use std::{ops::Deref as _, sync::Arc};
+use std::{
+    fmt::{self, Debug},
+    ops::Deref as _,
+    sync::Arc,
+};
 
 use index_vec::IndexVec;
 
 use cgmath::*;
 
-use crate::{AsMaterial, AsMesh, Camera, DynMesh, SurfaceView, binding};
+use crate::{AsMaterial, AsMesh, Camera, CameraBindGroup, DynMesh, SurfaceView, binding};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MeshId(pub usize);
@@ -49,8 +53,8 @@ struct MeshStorage {
     index_format: wgpu::IndexFormat,
 }
 
-impl std::fmt::Debug for MeshStorage {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for MeshStorage {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter
             .debug_struct("MeshStorage")
             .field("vertex_shader", &self.vertex_shader)
@@ -129,7 +133,7 @@ impl ObjectStorage {
         let material = scene.material(material_id);
         let pipeline = {
             let bind_group_layouts: &[&wgpu::BindGroupLayout] = &[
-                &binding::create_wgpu_bind_group_layout(device, &scene.camera),
+                &binding::create_wgpu_bind_group_layout(device, &scene.camera_bind_group),
                 &mesh.bind_group_layout,
                 &material.bind_group_layout,
             ];
@@ -179,6 +183,17 @@ impl ObjectStorage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CameraId(usize);
+impl index_vec::Idx for CameraId {
+    fn from_usize(idx: usize) -> Self {
+        Self(idx)
+    }
+    fn index(self) -> usize {
+        self.0
+    }
+}
+
 // /// Can be used to create a camera's bind group layout.
 // /// Panics if tried to create the actual bind group.
 // struct PhantomCamera;
@@ -196,34 +211,69 @@ impl ObjectStorage {
 //         }]
 //     }
 //     fn bind_group_entries(&self) -> Vec<wgpu::BindGroupEntry> {
-//         panic!()
+//         panic!("`PhantomCamera` is used to create bind group entry, which isn't possible")
 //     }
 // }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Scene {
     mesh_registry: IndexVec<MeshId, MeshStorage>,
     material_registry: IndexVec<MaterialId, MaterialStorage>,
     object_registry: IndexVec<ObjectId, ObjectStorage>,
     camera: Camera,
+    camera_bind_group: CameraBindGroup,
+    camera_wgpu_bind_group: wgpu::BindGroup,
+    #[expect(dead_code)]
+    camera_wgpu_bind_group_layout: wgpu::BindGroupLayout,
     surface_color_format: wgpu::TextureFormat,
     surface_depth_stencil_format: wgpu::TextureFormat,
 }
 
+impl Debug for Scene {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Scene")
+            .field("mesh_registry", &self.mesh_registry)
+            .field("material_registry", &self.material_registry)
+            .field("object_registry", &self.object_registry)
+            .field("camera_bind_group", &self.camera_bind_group)
+            .field("surface_color_format", &self.surface_color_format)
+            .field(
+                "surface_depth_stencil_format",
+                &self.surface_depth_stencil_format,
+            )
+            .finish_non_exhaustive()
+    }
+}
+
 impl Scene {
     pub fn new(
+        device: &wgpu::Device,
         camera: Camera,
         surface_color_format: wgpu::TextureFormat,
         surface_depth_stencil_format: wgpu::TextureFormat,
     ) -> Self {
+        let camera_bind_group = CameraBindGroup::create(device);
+        let (camera_wgpu_bind_group, camera_wgpu_bind_group_layout) =
+            binding::create_wgpu_bind_group(device, &camera_bind_group);
         Self {
             mesh_registry: IndexVec::new(),
             material_registry: IndexVec::new(),
             object_registry: IndexVec::new(),
             camera,
+            camera_bind_group,
+            camera_wgpu_bind_group,
+            camera_wgpu_bind_group_layout,
             surface_color_format,
             surface_depth_stencil_format,
         }
+    }
+
+    pub fn camera(&self) -> &Camera {
+        &self.camera
+    }
+
+    pub fn camera_mut(&mut self) -> &mut Camera {
+        &mut self.camera
     }
 
     fn mesh(&self, mesh_id: MeshId) -> &MeshStorage {
@@ -285,18 +335,29 @@ impl Scene {
         wgpu_render_pass.draw_indexed(0..mesh.index_buffer_length(), 0, 0..1);
     }
 
+    fn update_projection_uniform(&self, viewport_size: Vector2<f32>, queue: &wgpu::Queue) {
+        let projection = self.camera.projection_matrix(viewport_size);
+        self.camera_bind_group
+            .projection
+            .write(projection.into(), queue);
+    }
+
     /// Renders the scene onto the surface with a camera.
     /// TODO: perhaps make cameras also registerable, similar to mesh, material and object
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, surface: &SurfaceView) {
-        self.camera
-            .update_projection_uniform(surface.size_f32(), queue);
         assert!(surface.format() == self.surface_color_format);
         assert!(surface.depth_stencil_format() == self.surface_depth_stencil_format);
+
+        self.update_projection_uniform(surface.size_f32(), queue);
+
         let mut render_pass = surface.render_pass(device);
-        render_pass.set_bind_group(0, self.camera.wgpu_bind_group(), &[]);
+
+        render_pass.set_bind_group(0, &self.camera_wgpu_bind_group, &[]);
+
         for object_id in self.object_registry.indices() {
             self.draw_object(object_id, &mut render_pass);
         }
+
         render_pass.finish(queue);
     }
 
@@ -311,13 +372,5 @@ impl Scene {
         if let Some(model_view_buffer) = mesh.instance.model_view() {
             queue.write_buffer(model_view_buffer, 0, bytemuck::bytes_of(&model_view_array));
         }
-    }
-
-    pub fn camera(&self) -> &Camera {
-        &self.camera
-    }
-
-    pub fn camera_mut(&mut self) -> &mut Camera {
-        &mut self.camera
     }
 }

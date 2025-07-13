@@ -3,10 +3,7 @@ use std::sync::Arc;
 use cgmath::*;
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::{
-    binding::{Texture2d, TextureView2d},
-    camera::Camera,
-};
+use crate::binding::{Texture2d, TextureView2d};
 
 #[derive(Debug)]
 pub struct WindowSurface {
@@ -148,7 +145,9 @@ impl Surface {
     pub fn view(&self) -> SurfaceView {
         SurfaceView {
             color_texture: self.color_texture().view(Default::default()),
-            depth_stencil_texture: self.depth_stencil_texture.view(wgpu::TextureSampleType::Depth),
+            depth_stencil_texture: self
+                .depth_stencil_texture
+                .view(wgpu::TextureSampleType::Depth),
         }
     }
 
@@ -268,10 +267,6 @@ impl RenderPass {
 
     pub fn wgpu_render_pass_mut(&mut self) -> &mut wgpu::RenderPass<'static> {
         &mut self.wgpu_render_pass
-    }
-
-    pub fn use_camera(&mut self, camera: &Camera) {
-        self.set_bind_group(0, camera.wgpu_bind_group(), &[]);
     }
 
     pub fn set_bind_group<'a, BG>(
