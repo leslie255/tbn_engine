@@ -8,7 +8,7 @@ use index_vec::IndexVec;
 
 use cgmath::*;
 
-use crate::{AsMaterial, AsMesh, Camera, CameraBindGroup, DynMesh, SurfaceView, binding};
+use crate::{binding, AsMaterial, AsMesh, Camera, CameraBindGroup, DepthStencilTextureFormat, DynMesh, SurfaceView, TextureFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MeshId(pub usize);
@@ -105,7 +105,7 @@ struct MaterialStorage {
 impl MaterialStorage {
     fn new<Material: AsMaterial>(
         device: &wgpu::Device,
-        surface_format: wgpu::TextureFormat,
+        surface_format: TextureFormat,
         material_instance: &Material,
     ) -> Self {
         let (wgpu_bind_group, bind_group_layout) =
@@ -164,7 +164,7 @@ impl ObjectStorage {
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: scene.surface_color_format,
+                        format: scene.surface_color_format.into(),
                         blend: material.blend_state,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -214,8 +214,8 @@ pub struct Scene {
     camera_wgpu_bind_group: wgpu::BindGroup,
     #[expect(dead_code)]
     camera_wgpu_bind_group_layout: wgpu::BindGroupLayout,
-    surface_color_format: wgpu::TextureFormat,
-    surface_depth_stencil_format: wgpu::TextureFormat,
+    surface_color_format: TextureFormat,
+    surface_depth_stencil_format: DepthStencilTextureFormat,
 }
 
 impl Debug for Scene {
@@ -237,8 +237,8 @@ impl Debug for Scene {
 impl Scene {
     pub fn new(
         device: &wgpu::Device,
-        surface_color_format: wgpu::TextureFormat,
-        surface_depth_stencil_format: wgpu::TextureFormat,
+        surface_color_format: TextureFormat,
+        surface_depth_stencil_format: DepthStencilTextureFormat
     ) -> Self {
         let camera_bind_group = CameraBindGroup::create(device);
         let (camera_wgpu_bind_group, camera_wgpu_bind_group_layout) =
@@ -264,6 +264,7 @@ impl Scene {
         &self.material_registry[material_id]
     }
 
+    #[allow(dead_code)]
     fn object(&self, object_id: ObjectId) -> &ObjectStorage {
         &self.object_registry[object_id]
     }

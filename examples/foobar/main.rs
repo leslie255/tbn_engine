@@ -17,7 +17,7 @@ use winit::{
 
 #[allow(dead_code)]
 struct Image<Data: AsRef<[u8]>> {
-    format: wgpu::TextureFormat,
+    format: TextureFormat,
     size: Vector2<u32>,
     data: Data,
 }
@@ -25,7 +25,7 @@ struct Image<Data: AsRef<[u8]>> {
 #[allow(dead_code)]
 fn test_image() -> Image<impl AsRef<[u8]>> {
     Image {
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format: TextureFormat::Rgba8Unorm,
         size: vec2(256, 256),
         data: include_bytes!("./image.bin"),
     }
@@ -112,7 +112,7 @@ impl State {
         ));
 
         let cube_0_material = scene.add_material(&device, &{
-            let material = UniformFill::create(&device);
+            let material = materials::UniformFill::create(&device);
             material
                 .fill_color
                 .write(Rgba::new(0.7, 0.4, 1.0, 1.0), &queue);
@@ -120,7 +120,11 @@ impl State {
         });
         let cube_0_mesh = scene.add_mesh(
             &device,
-            Arc::new(Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES)),
+            Arc::new(meshes::Mesh3D::create(
+                &device,
+                &CUBE_VERTICES,
+                &CUBE_INDICIES,
+            )),
         );
         let cube_0 = scene.add_object(&device, camera, cube_0_mesh, cube_0_material);
 
@@ -133,7 +137,7 @@ impl State {
             image.data.as_ref(),
         );
         let cube_1_material = scene.add_material(&device, &{
-            Textured::create(
+            materials::Textured::create(
                 texture.view(Default::default()),
                 Sampler::create(
                     &device,
@@ -145,18 +149,18 @@ impl State {
         });
         let cube_1_mesh = scene.add_mesh(
             &device,
-            Arc::new(Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES)),
+            Arc::new(meshes::Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES)),
         );
         let cube_1 = scene.add_object(&device, camera, cube_1_mesh, cube_1_material);
 
         let ground_material = scene.add_material(&device, &{
-            let material = SdfCircle::create(&device);
+            let material = materials::SdfCircle::create(&device);
             material
                 .fill_color
                 .write(Rgba::new(0.5, 0.5, 0.5, 1.0), &queue);
             material
         });
-        let ground_mesh = scene.add_mesh(&device, Arc::new(Quad::create(&device)));
+        let ground_mesh = scene.add_mesh(&device, Arc::new(meshes::Quad::create(&device)));
         let ground = scene.add_object(&device, camera, ground_mesh, ground_material);
 
         // Ground.
@@ -224,11 +228,11 @@ impl State {
 }
 
 #[derive(Default)]
-struct App {
+struct Application {
     state: Option<State>,
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler for Application {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window = Arc::new(
             event_loop
@@ -268,6 +272,6 @@ fn main() {
 
     let event_loop = EventLoop::new().unwrap();
 
-    let mut app = App::default();
+    let mut app = Application::default();
     event_loop.run_app(&mut app).unwrap();
 }

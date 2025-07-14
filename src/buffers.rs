@@ -4,6 +4,8 @@ use bytemuck::{Pod, Zeroable};
 use cgmath::*;
 use wgpu::util::DeviceExt as _;
 
+use crate::Bindable;
+
 pub trait Vertex: Pod + Copy {
     const LAYOUT: wgpu::VertexBufferLayout<'static>;
 }
@@ -204,5 +206,60 @@ impl<T: Index> IndexBuffer<T> {
     /// This is always safe because wgpu is safe.
     pub fn length_mut(&mut self) -> &mut u32 {
         &mut self.length
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UniformBuffer<T: Pod + Copy> {
+    wgpu_buffer: wgpu::Buffer,
+    _marker: PhantomData<T>,
+}
+
+impl<T: Pod + Copy> UniformBuffer<T> {
+    pub fn create_init(device: &wgpu::Device, contents: T) -> Self {
+        let bytes = bytemuck::bytes_of(&contents);
+        let wgpu_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        Self {
+            wgpu_buffer,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn wgpu_buffer(&self) -> &wgpu::Buffer {
+        &self.wgpu_buffer
+    }
+
+    pub fn wgpu_buffer_mut(&mut self) -> &mut wgpu::Buffer {
+        &mut self.wgpu_buffer
+    }
+
+    pub fn write(&self, contents: T, queue: &wgpu::Queue) {
+        queue.write_buffer(self.wgpu_buffer(), 0, bytemuck::bytes_of(&contents));
+    }
+}
+
+impl<T: Pod + Copy> Bindable for UniformBuffer<T> {
+    fn bind_group_layout_entry(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+        wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::all(),
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
+    }
+
+    fn bind_group_entry(&self, binding: u32) -> wgpu::BindGroupEntry {
+        wgpu::BindGroupEntry {
+            binding,
+            resource: self.wgpu_buffer().as_entire_binding(),
+        }
     }
 }
