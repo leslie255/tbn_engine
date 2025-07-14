@@ -92,23 +92,20 @@ impl AsMaterial for SdfCircle {
 pub struct Textured {
     texture_view: TextureView2d,
     sampler: Sampler,
-    gamma: UniformBuffer<f32>,
 }
 
 impl_as_bind_group! {
     Textured {
         0 => texture_view,
         1 => sampler,
-        2 => gamma,
     }
 }
 
 impl Textured {
-    pub fn create(device: &wgpu::Device, texture_view: TextureView2d, sampler: Sampler) -> Self {
+    pub fn create(texture_view: TextureView2d, sampler: Sampler) -> Self {
         Self {
             texture_view,
             sampler,
-            gamma: UniformBuffer::create_init(device, 1.0),
         }
     }
 
@@ -118,10 +115,6 @@ impl Textured {
 
     pub fn sampler(&self) -> &Sampler {
         &self.sampler
-    }
-
-    pub fn gamma(&self) -> &UniformBuffer<f32> {
-        &self.gamma
     }
 }
 

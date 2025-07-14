@@ -79,9 +79,7 @@ struct State {
     window: Arc<Window>,
     window_surface: WindowSurface,
     scene: Scene,
-    ground: ObjectId,
-    cube_0: ObjectId,
-    cube_1: ObjectId,
+    camera: CameraId,
 }
 
 impl State {
@@ -98,22 +96,20 @@ impl State {
 
         let window_surface = WindowSurface::new(Arc::clone(&window), &instance, &adapter, &device);
 
-        let y = 180.0;
-        let camera = Camera::new(
-            point3(0.0, y, 0.0),
-            vec3(0.0, 1.0, 0.0),
-            CameraDirection::LookAt(point3(0.0, y, 0.0)),
-            Deg(50.0),
-            1.0,
-            1000.0,
-        );
-
         let mut scene = Scene::new(
             &device,
-            camera,
             window_surface.format(),
             window_surface.depth_stencil_format(),
         );
+
+        let camera = scene.add_camera(Camera::new(
+            point3(0.0, 180.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            CameraDirection::LookAt(point3(0.0, 180.0, 0.0)),
+            Deg(50.0),
+            1.0,
+            1000.0,
+        ));
 
         let cube_0_material = scene.add_material(&device, &{
             let material = UniformFill::create(&device);
@@ -126,7 +122,7 @@ impl State {
             &device,
             Arc::new(Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES)),
         );
-        let cube_0 = scene.add_object(&device, cube_0_mesh, cube_0_material);
+        let cube_0 = scene.add_object(&device, camera, cube_0_mesh, cube_0_material);
 
         let image = test_image();
         let texture = Texture2d::create_init(
@@ -138,7 +134,6 @@ impl State {
         );
         let cube_1_material = scene.add_material(&device, &{
             Textured::create(
-                &device,
                 texture.view(Default::default()),
                 Sampler::create(
                     &device,
@@ -152,7 +147,7 @@ impl State {
             &device,
             Arc::new(Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES)),
         );
-        let cube_1 = scene.add_object(&device, cube_1_mesh, cube_1_material);
+        let cube_1 = scene.add_object(&device, camera, cube_1_mesh, cube_1_material);
 
         let ground_material = scene.add_material(&device, &{
             let material = SdfCircle::create(&device);
@@ -162,7 +157,38 @@ impl State {
             material
         });
         let ground_mesh = scene.add_mesh(&device, Arc::new(Quad::create(&device)));
-        let ground = scene.add_object(&device, ground_mesh, ground_material);
+        let ground = scene.add_object(&device, camera, ground_mesh, ground_material);
+
+        // Ground.
+        let camera_far = scene.camera(camera).far;
+        scene.set_object_model(
+            ground,
+            Matrix4::from_scale(camera_far * 2.0)
+                * Matrix4::from_translation(vec3(-0.5, 0.0, -0.5))
+                * Matrix4::from_angle_x(Deg(90.0)),
+        );
+
+        // Cube 0.
+        let cube_0_size = 100.0;
+        scene.set_object_model(
+            cube_0,
+            Matrix4::from_translation(vec3(-120.0, cube_0_size + 100.0, 0.0))
+                * Matrix4::from_angle_x(Deg(45.0))
+                * Matrix4::from_angle_y(Deg(30.0))
+                * Matrix4::from_scale(cube_0_size)
+                * Matrix4::from_translation([-0.5; 3].into()),
+        );
+
+        // Cube 1.
+        let cube_1_size = 80.0;
+        scene.set_object_model(
+            cube_1,
+            Matrix4::from_translation(vec3(120.0, cube_1_size + 80.0, 0.0))
+                * Matrix4::from_angle_x(Deg(-12.0))
+                * Matrix4::from_angle_z(Deg(40.0))
+                * Matrix4::from_scale(cube_1_size)
+                * Matrix4::from_translation([-0.5; 3].into()),
+        );
 
         State {
             window,
@@ -170,9 +196,7 @@ impl State {
             queue,
             window_surface,
             scene,
-            ground,
-            cube_0,
-            cube_1,
+            camera,
         }
     }
 
@@ -185,50 +209,15 @@ impl State {
     }
 
     fn render(&mut self) {
+        let t = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        // Update camera position.
+        self.scene.camera_mut(self.camera).position.x = (f64::cos(t) as f32) * 400.0;
+        self.scene.camera_mut(self.camera).position.z = (f64::sin(t) as f32) * 400.0;
+
         self.window_surface.frame(|surface| {
-            let t = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f64();
-
-            // Update camera position.
-            self.scene.camera_mut().position.x = (f64::cos(t) as f32) * 400.0;
-            self.scene.camera_mut().position.z = (f64::sin(t) as f32) * 400.0;
-
-            // Ground.
-            let camera_far = self.scene.camera().far;
-            self.scene.set_model(
-                &self.queue,
-                self.ground,
-                Matrix4::from_scale(camera_far * 2.0)
-                    * Matrix4::from_translation(vec3(-0.5, 0.0, -0.5))
-                    * Matrix4::from_angle_x(Deg(90.0)),
-            );
-
-            // Cube 0.
-            let cube_0_size = 100.0;
-            self.scene.set_model(
-                &self.queue,
-                self.cube_0,
-                Matrix4::from_translation(vec3(-120.0, cube_0_size + 100.0, 0.0))
-                    * Matrix4::from_angle_x(Deg(45.0))
-                    * Matrix4::from_angle_y(Deg(30.0))
-                    * Matrix4::from_scale(cube_0_size)
-                    * Matrix4::from_translation([-0.5; 3].into()),
-            );
-
-            // Cube 1.
-            let cube_1_size = 80.0;
-            self.scene.set_model(
-                &self.queue,
-                self.cube_1,
-                Matrix4::from_translation(vec3(120.0, cube_1_size + 80.0, 0.0))
-                    * Matrix4::from_angle_x(Deg(-12.0))
-                    * Matrix4::from_angle_z(Deg(40.0))
-                    * Matrix4::from_scale(cube_1_size)
-                    * Matrix4::from_translation([-0.5; 3].into()),
-            );
-
             self.scene.render(&self.device, &self.queue, &surface);
         });
     }

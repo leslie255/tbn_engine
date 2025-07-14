@@ -121,14 +121,22 @@ impl MaterialStorage {
 
 #[derive(Debug, Clone)]
 struct ObjectStorage {
+    camera_id: CameraId,
     mesh_id: MeshId,
     material_id: MaterialId,
     pipeline: wgpu::RenderPipeline,
+    model: Matrix4<f32>,
     is_hidden: bool,
 }
 
 impl ObjectStorage {
-    fn new(scene: &Scene, device: &wgpu::Device, mesh_id: MeshId, material_id: MaterialId) -> Self {
+    fn new(
+        scene: &Scene,
+        device: &wgpu::Device,
+        camera: CameraId,
+        mesh_id: MeshId,
+        material_id: MaterialId,
+    ) -> Self {
         let mesh = scene.mesh(mesh_id);
         let material = scene.material(material_id);
         let pipeline = {
@@ -175,16 +183,18 @@ impl ObjectStorage {
             })
         };
         Self {
+            camera_id: camera,
             mesh_id,
             material_id,
             pipeline,
+            model: Matrix4::identity(),
             is_hidden: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CameraId(usize);
+pub struct CameraId(pub usize);
 impl index_vec::Idx for CameraId {
     fn from_usize(idx: usize) -> Self {
         Self(idx)
@@ -194,33 +204,12 @@ impl index_vec::Idx for CameraId {
     }
 }
 
-// /// Can be used to create a camera's bind group layout.
-// /// Panics if tried to create the actual bind group.
-// struct PhantomCamera;
-// impl AsBindGroup for PhantomCamera {
-//     fn bind_group_layout_entries(&self) -> Vec<wgpu::BindGroupLayoutEntry> {
-//         vec![wgpu::BindGroupLayoutEntry {
-//             binding: 0,
-//             visibility: wgpu::ShaderStages::all(),
-//             ty: wgpu::BindingType::Buffer {
-//                 ty: wgpu::BufferBindingType::Uniform,
-//                 has_dynamic_offset: false,
-//                 min_binding_size: None,
-//             },
-//             count: None,
-//         }]
-//     }
-//     fn bind_group_entries(&self) -> Vec<wgpu::BindGroupEntry> {
-//         panic!("`PhantomCamera` is used to create bind group entry, which isn't possible")
-//     }
-// }
-
 #[derive(Clone)]
 pub struct Scene {
     mesh_registry: IndexVec<MeshId, MeshStorage>,
     material_registry: IndexVec<MaterialId, MaterialStorage>,
     object_registry: IndexVec<ObjectId, ObjectStorage>,
-    camera: Camera,
+    camera_registry: IndexVec<CameraId, Camera>,
     camera_bind_group: CameraBindGroup,
     camera_wgpu_bind_group: wgpu::BindGroup,
     #[expect(dead_code)]
@@ -248,7 +237,6 @@ impl Debug for Scene {
 impl Scene {
     pub fn new(
         device: &wgpu::Device,
-        camera: Camera,
         surface_color_format: wgpu::TextureFormat,
         surface_depth_stencil_format: wgpu::TextureFormat,
     ) -> Self {
@@ -259,21 +247,13 @@ impl Scene {
             mesh_registry: IndexVec::new(),
             material_registry: IndexVec::new(),
             object_registry: IndexVec::new(),
-            camera,
+            camera_registry: IndexVec::new(),
             camera_bind_group,
             camera_wgpu_bind_group,
             camera_wgpu_bind_group_layout,
             surface_color_format,
             surface_depth_stencil_format,
         }
-    }
-
-    pub fn camera(&self) -> &Camera {
-        &self.camera
-    }
-
-    pub fn camera_mut(&mut self) -> &mut Camera {
-        &mut self.camera
     }
 
     fn mesh(&self, mesh_id: MeshId) -> &MeshStorage {
@@ -286,6 +266,28 @@ impl Scene {
 
     fn object(&self, object_id: ObjectId) -> &ObjectStorage {
         &self.object_registry[object_id]
+    }
+
+    pub fn camera(&self, camera_id: CameraId) -> &Camera {
+        &self.camera_registry[camera_id]
+    }
+
+    #[expect(dead_code)]
+    fn mesh_mut(&mut self, mesh_id: MeshId) -> &mut MeshStorage {
+        &mut self.mesh_registry[mesh_id]
+    }
+
+    #[expect(dead_code)]
+    fn material_mut(&mut self, material_id: MaterialId) -> &mut MaterialStorage {
+        &mut self.material_registry[material_id]
+    }
+
+    fn object_mut(&mut self, object_id: ObjectId) -> &mut ObjectStorage {
+        &mut self.object_registry[object_id]
+    }
+
+    pub fn camera_mut(&mut self, camera_id: CameraId) -> &mut Camera {
+        &mut self.camera_registry[camera_id]
     }
 
     pub fn add_mesh(&mut self, device: &wgpu::Device, mesh_instance: Arc<impl AsMesh>) -> MeshId {
@@ -308,35 +310,28 @@ impl Scene {
     pub fn add_object(
         &mut self,
         device: &wgpu::Device,
+        camera: CameraId,
         mesh: MeshId,
         material: MaterialId,
     ) -> ObjectId {
-        let object = ObjectStorage::new(self, device, mesh, material);
+        debug_assert!(mesh.0 < self.mesh_registry.len());
+        debug_assert!(material.0 < self.material_registry.len());
+        debug_assert!(camera.0 < self.camera_registry.len());
+        let object = ObjectStorage::new(self, device, camera, mesh, material);
         self.object_registry.push(object)
     }
 
-    /// Skips if object is hidden.
-    fn draw_object(&self, object_id: ObjectId, render_pass: &mut crate::RenderPass) {
-        let object = &self.object(object_id);
-        // These two lines are delibrately placed before the `is_hidden` check.
-        // This is to make sure that had an invalid ID be produced somewhere, the panic site is
-        // closer to the source.
-        let mesh = self.mesh(object.mesh_id);
-        let material = self.material(object.material_id);
-        if object.is_hidden {
-            return;
-        }
-        let wgpu_render_pass = render_pass.wgpu_render_pass_mut();
-        wgpu_render_pass.set_pipeline(&object.pipeline);
-        wgpu_render_pass.set_bind_group(1, &mesh.wgpu_bind_group, &[]);
-        wgpu_render_pass.set_bind_group(2, &material.wgpu_bind_group, &[]);
-        wgpu_render_pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-        wgpu_render_pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format);
-        wgpu_render_pass.draw_indexed(0..mesh.index_buffer_length(), 0, 0..1);
+    pub fn add_camera(&mut self, camera: Camera) -> CameraId {
+        self.camera_registry.push(camera)
     }
 
-    fn update_projection_uniform(&self, viewport_size: Vector2<f32>, queue: &wgpu::Queue) {
-        let projection = self.camera.projection_matrix(viewport_size);
+    fn update_projection_uniform(
+        &self,
+        viewport_size: Vector2<f32>,
+        camera: &Camera,
+        queue: &wgpu::Queue,
+    ) {
+        let projection = camera.projection_matrix(viewport_size);
         self.camera_bind_group
             .projection
             .write(projection.into(), queue);
@@ -345,32 +340,53 @@ impl Scene {
     /// Renders the scene onto the surface with a camera.
     /// TODO: perhaps make cameras also registerable, similar to mesh, material and object
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, surface: &SurfaceView) {
-        assert!(surface.format() == self.surface_color_format);
-        assert!(surface.depth_stencil_format() == self.surface_depth_stencil_format);
-
-        self.update_projection_uniform(surface.size_f32(), queue);
+        // For more intuitive panic site if texture format mismatch happens:
+        debug_assert!(surface.format() == self.surface_color_format);
+        debug_assert!(surface.depth_stencil_format() == self.surface_depth_stencil_format);
 
         let mut render_pass = surface.render_pass(device);
 
         render_pass.set_bind_group(0, &self.camera_wgpu_bind_group, &[]);
 
-        for object_id in self.object_registry.indices() {
-            self.draw_object(object_id, &mut render_pass);
+        for object in &self.object_registry {
+            // These 3 lines are delibrately placed before the `is_hidden` check to make sure that,
+            // had an invalid ID be produced, the panic site is closer to the source.
+            let mesh = self.mesh(object.mesh_id);
+            let material = self.material(object.material_id);
+            let camera = self.camera(object.camera_id);
+
+            if object.is_hidden {
+                continue;
+            }
+
+            self.update_projection_uniform(surface.size_f32(), camera, queue);
+            if let Some(model_view_uniform) = mesh.instance.model_view() {
+                let model_view = camera.view_matrix() * object.model;
+                let model_view_array: [[f32; 4]; 4] = model_view.into();
+                queue.write_buffer(model_view_uniform, 0, bytemuck::bytes_of(&model_view_array));
+            }
+            let wgpu_render_pass = render_pass.wgpu_render_pass_mut();
+            wgpu_render_pass.set_pipeline(&object.pipeline);
+            wgpu_render_pass.set_bind_group(1, &mesh.wgpu_bind_group, &[]);
+            wgpu_render_pass.set_bind_group(2, &material.wgpu_bind_group, &[]);
+            wgpu_render_pass.set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
+            wgpu_render_pass.set_index_buffer(mesh.index_buffer().slice(..), mesh.index_format);
+            wgpu_render_pass.draw_indexed(0..mesh.index_buffer_length(), 0, 0..1);
         }
 
         render_pass.finish(queue);
     }
 
-    /// Set the model matrix for an object.
+    /// Set the model matrix for an object's mesh.
     /// NOP for objects that doesn't use traditional model-view matrix (object with a mesh that
     /// returns `None` for `AsMesh::model_view`).
-    pub fn set_model(&self, queue: &wgpu::Queue, object_id: ObjectId, model: Matrix4<f32>) {
-        let model_view = self.camera.view_matrix() * model;
-        let model_view_array: [[f32; 4]; 4] = model_view.into();
-        let object = self.object(object_id);
-        let mesh = self.mesh(object.mesh_id);
-        if let Some(model_view_buffer) = mesh.instance.model_view() {
-            queue.write_buffer(model_view_buffer, 0, bytemuck::bytes_of(&model_view_array));
-        }
+    pub fn set_object_model(&mut self, object_id: ObjectId, model: Matrix4<f32>) {
+        let object = self.object_mut(object_id);
+        object.model = model;
+    }
+
+    /// Set whether an object is hidden.
+    pub fn set_object_is_hidden(&mut self, object_id: ObjectId, is_hidden: bool) {
+        self.object_mut(object_id).is_hidden = is_hidden;
     }
 }
