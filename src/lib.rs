@@ -1,22 +1,22 @@
 /// Contains the `Bindable` and `AsBindGroup` traits, and functions for creating wgpu bind groups
 /// and bind group layouts.
-mod binding;
+pub(crate) mod binding;
 /// Contains vertex, index, and uniform buffers.
-mod buffers;
+pub(crate) mod buffers;
 /// Contains data structures for camera.
-mod camera;
+pub(crate) mod camera;
 /// Contains data structures for colors.
-mod color;
+pub(crate) mod color;
 /// Contains the `AsMaterial` trait and various materials.
-mod material;
+pub(crate) mod material;
 /// Contains the `AsMesh` trait and various meshes.
-mod mesh;
+pub(crate) mod mesh;
 /// Contains `Scene`, various ID types, and data structures used internally in `Scene`.
-mod scene;
+pub(crate) mod scene;
 /// Contains `Surface`, `SurfaceView`, `WindowSurface`, and `RenderPass`.
-mod surface;
+pub(crate) mod surface;
 /// Contains textures, texture views, texture formats, and samplers.
-mod texture;
+pub(crate) mod texture;
 
 pub use binding::*;
 pub use buffers::*;

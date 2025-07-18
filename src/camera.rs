@@ -11,6 +11,7 @@ pub enum CameraDirection {
 /// A 2D orthographical camera.
 #[derive(Debug, Clone)]
 pub struct Camera {
+    // Camera isn't `Copy` for stability sake.
     pub position: Point3<f32>,
     pub up: Vector3<f32>,
     pub direction: CameraDirection,

@@ -1,45 +1,63 @@
 use std::{
+    collections::{HashMap, hash_map},
     fmt::{self, Debug},
-    ops::Deref as _,
-    sync::Arc,
+    ops::{Deref, DerefMut},
+    sync::{Arc, Mutex},
 };
-
-use index_vec::IndexVec;
 
 use cgmath::*;
 
-use crate::{binding, AsMaterial, AsMesh, Camera, CameraBindGroup, DepthStencilTextureFormat, DynMesh, SurfaceView, TextureFormat};
+use crate::{
+    AsMaterial, AsMesh, Camera, CameraBindGroup, DepthStencilTextureFormat, DynMesh, SurfaceView,
+    TextureFormat, binding,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MeshId(pub usize);
-impl index_vec::Idx for MeshId {
-    fn from_usize(idx: usize) -> Self {
-        Self(idx)
+// TODO: Perhaps use a third-party, `Weak`-less `Arc`.
+macro_rules! define_ref_type {
+    ($T:ident, $Storage:ty $(,)?) => {
+        #[allow(dead_code)]
+        #[derive(Debug, Clone)]
+        pub struct $T {
+            storage: Arc<Mutex<$Storage>>,
+        }
+
+        impl $T {
+            fn new(storage: $Storage) -> Self {
+                Self {
+                    storage: Arc::new(Mutex::new(storage)),
+                }
+            }
+
+            #[track_caller]
+            fn lock(&self) -> impl DerefMut<Target = $Storage> {
+                self.storage.lock().unwrap()
+            }
+        }
+    };
+}
+
+define_ref_type!(MeshRef, MeshStorage);
+define_ref_type!(MaterialRef, MaterialStorage);
+define_ref_type!(ObjectRef, ObjectStorage);
+define_ref_type!(CameraRef, Camera);
+
+impl ObjectRef {
+    pub fn set_is_hidden(&self, is_hidden: bool) {
+        self.lock().is_hidden = is_hidden;
     }
-    fn index(self) -> usize {
-        self.0
+
+    pub fn get_is_hidden(&self) -> bool {
+        self.lock().is_hidden
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MaterialId(pub usize);
-impl index_vec::Idx for MaterialId {
-    fn from_usize(idx: usize) -> Self {
-        Self(idx)
-    }
-    fn index(self) -> usize {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ObjectId(pub usize);
-impl index_vec::Idx for ObjectId {
-    fn from_usize(idx: usize) -> Self {
-        Self(idx)
-    }
-    fn index(self) -> usize {
-        self.0
+impl CameraRef {
+    pub fn with_mut<T>(&self, f: impl FnOnce(&mut Camera) -> T) -> T {
+        // Operates on a copy of the camera in case user tries to render while inside the closure.
+        let mut camera_copy = self.lock().clone();
+        let result = f(&mut camera_copy);
+        *self.lock() = camera_copy;
+        result
     }
 }
 
@@ -121,9 +139,11 @@ impl MaterialStorage {
 
 #[derive(Debug, Clone)]
 struct ObjectStorage {
-    camera_id: CameraId,
-    mesh_id: MeshId,
-    material_id: MaterialId,
+    /// Its index in the scene's object list.
+    id: u32,
+    camera: CameraRef,
+    mesh: MeshRef,
+    material: MaterialRef,
     pipeline: wgpu::RenderPipeline,
     model: Matrix4<f32>,
     is_hidden: bool,
@@ -132,18 +152,19 @@ struct ObjectStorage {
 impl ObjectStorage {
     fn new(
         scene: &Scene,
+        id: u32,
         device: &wgpu::Device,
-        camera: CameraId,
-        mesh_id: MeshId,
-        material_id: MaterialId,
+        camera: CameraRef,
+        mesh: MeshRef,
+        material: MaterialRef,
     ) -> Self {
-        let mesh = scene.mesh(mesh_id);
-        let material = scene.material(material_id);
+        let mesh_storage = mesh.lock();
+        let material_storage = material.lock();
         let pipeline = {
             let bind_group_layouts: &[&wgpu::BindGroupLayout] = &[
                 &binding::create_wgpu_bind_group_layout(device, &scene.camera_bind_group),
-                &mesh.bind_group_layout,
-                &material.bind_group_layout,
+                &mesh_storage.bind_group_layout,
+                &material_storage.bind_group_layout,
             ];
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
@@ -154,18 +175,18 @@ impl ObjectStorage {
                 label: None,
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
-                    module: &mesh.vertex_shader,
+                    module: &mesh_storage.vertex_shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[mesh.vertex_buffer_layout.clone()],
+                    buffers: &[mesh_storage.vertex_buffer_layout.clone()],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &material.fragment_shader,
+                    module: &material_storage.fragment_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: scene.surface_color_format.into(),
-                        blend: material.blend_state,
+                        blend: material_storage.blend_state,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
@@ -182,10 +203,12 @@ impl ObjectStorage {
                 cache: None,
             })
         };
+        drop((mesh_storage, material_storage));
         Self {
-            camera_id: camera,
-            mesh_id,
-            material_id,
+            id,
+            camera,
+            mesh,
+            material,
             pipeline,
             model: Matrix4::identity(),
             is_hidden: false,
@@ -193,149 +216,110 @@ impl ObjectStorage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CameraId(pub usize);
-impl index_vec::Idx for CameraId {
-    fn from_usize(idx: usize) -> Self {
-        Self(idx)
-    }
-    fn index(self) -> usize {
-        self.0
-    }
-}
-
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Scene {
-    mesh_registry: IndexVec<MeshId, MeshStorage>,
-    material_registry: IndexVec<MaterialId, MaterialStorage>,
-    object_registry: IndexVec<ObjectId, ObjectStorage>,
-    camera_registry: IndexVec<CameraId, Camera>,
     camera_bind_group: CameraBindGroup,
     camera_wgpu_bind_group: wgpu::BindGroup,
+    objects: Vec<Option<ObjectRef>>,
+    object_indices: HashMap<u32, usize>,
+    object_id_counter: u32,
     #[expect(dead_code)]
     camera_wgpu_bind_group_layout: wgpu::BindGroupLayout,
     surface_color_format: TextureFormat,
     surface_depth_stencil_format: DepthStencilTextureFormat,
 }
 
-impl Debug for Scene {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Scene")
-            .field("mesh_registry", &self.mesh_registry)
-            .field("material_registry", &self.material_registry)
-            .field("object_registry", &self.object_registry)
-            .field("camera_bind_group", &self.camera_bind_group)
-            .field("surface_color_format", &self.surface_color_format)
-            .field(
-                "surface_depth_stencil_format",
-                &self.surface_depth_stencil_format,
-            )
-            .finish_non_exhaustive()
-    }
-}
-
 impl Scene {
     pub fn new(
         device: &wgpu::Device,
         surface_color_format: TextureFormat,
-        surface_depth_stencil_format: DepthStencilTextureFormat
+        surface_depth_stencil_format: DepthStencilTextureFormat,
     ) -> Self {
         let camera_bind_group = CameraBindGroup::create(device);
         let (camera_wgpu_bind_group, camera_wgpu_bind_group_layout) =
             binding::create_wgpu_bind_group(device, &camera_bind_group);
         Self {
-            mesh_registry: IndexVec::new(),
-            material_registry: IndexVec::new(),
-            object_registry: IndexVec::new(),
-            camera_registry: IndexVec::new(),
             camera_bind_group,
             camera_wgpu_bind_group,
             camera_wgpu_bind_group_layout,
+            objects: Vec::new(),
+            object_indices: HashMap::new(),
+            object_id_counter: 0,
             surface_color_format,
             surface_depth_stencil_format,
         }
     }
 
-    fn mesh(&self, mesh_id: MeshId) -> &MeshStorage {
-        &self.mesh_registry[mesh_id]
+    pub fn create_mesh(&mut self, device: &wgpu::Device, instance: Arc<impl AsMesh>) -> MeshRef {
+        let mesh_storage = MeshStorage::new(device, instance);
+        MeshRef::new(mesh_storage)
     }
 
-    fn material(&self, material_id: MaterialId) -> &MaterialStorage {
-        &self.material_registry[material_id]
-    }
-
-    #[allow(dead_code)]
-    fn object(&self, object_id: ObjectId) -> &ObjectStorage {
-        &self.object_registry[object_id]
-    }
-
-    pub fn camera(&self, camera_id: CameraId) -> &Camera {
-        &self.camera_registry[camera_id]
-    }
-
-    #[expect(dead_code)]
-    fn mesh_mut(&mut self, mesh_id: MeshId) -> &mut MeshStorage {
-        &mut self.mesh_registry[mesh_id]
-    }
-
-    #[expect(dead_code)]
-    fn material_mut(&mut self, material_id: MaterialId) -> &mut MaterialStorage {
-        &mut self.material_registry[material_id]
-    }
-
-    fn object_mut(&mut self, object_id: ObjectId) -> &mut ObjectStorage {
-        &mut self.object_registry[object_id]
-    }
-
-    pub fn camera_mut(&mut self, camera_id: CameraId) -> &mut Camera {
-        &mut self.camera_registry[camera_id]
-    }
-
-    pub fn add_mesh(&mut self, device: &wgpu::Device, mesh_instance: Arc<impl AsMesh>) -> MeshId {
-        self.mesh_registry
-            .push(MeshStorage::new(device, mesh_instance))
-    }
-
-    pub fn add_material(
+    pub fn create_material(
         &mut self,
         device: &wgpu::Device,
-        material_instance: &impl AsMaterial,
-    ) -> MaterialId {
-        self.material_registry.push(MaterialStorage::new(
-            device,
-            self.surface_color_format,
-            material_instance,
-        ))
+        instance: &impl AsMaterial,
+    ) -> MaterialRef {
+        let material_storage = MaterialStorage::new(device, self.surface_color_format, instance);
+        MaterialRef::new(material_storage)
     }
 
-    pub fn add_object(
+    /// Create an object and add it into the list of objects for rendering.
+    pub fn create_object(
         &mut self,
         device: &wgpu::Device,
-        camera: CameraId,
-        mesh: MeshId,
-        material: MaterialId,
-    ) -> ObjectId {
-        debug_assert!(mesh.0 < self.mesh_registry.len());
-        debug_assert!(material.0 < self.material_registry.len());
-        debug_assert!(camera.0 < self.camera_registry.len());
-        let object = ObjectStorage::new(self, device, camera, mesh, material);
-        self.object_registry.push(object)
+        camera: CameraRef,
+        mesh: MeshRef,
+        material: MaterialRef,
+    ) -> ObjectRef {
+        let id = self.object_id_counter;
+        self.object_id_counter += 1;
+        let object_storage = ObjectStorage::new(self, id, device, camera, mesh, material);
+        let object = ObjectRef::new(object_storage);
+        self.add_object(object.clone());
+        object
     }
 
-    pub fn add_camera(&mut self, camera: Camera) -> CameraId {
-        self.camera_registry.push(camera)
+    pub fn create_camera(&mut self, camera: Camera) -> CameraRef {
+        CameraRef::new(camera)
     }
 
-    fn update_projection_uniform(
-        &self,
-        viewport_size: Vector2<f32>,
-        camera: &Camera,
-        queue: &wgpu::Queue,
-    ) {
-        let projection = camera.projection_matrix(viewport_size);
-        self.camera_bind_group
-            .projection
-            .write(projection.into(), queue);
+    /// Add object to the list of object for rendering.
+    ///
+    /// # Panics
+    ///
+    /// - if object was aready in the list
+    pub fn add_object(&mut self, object: ObjectRef) {
+        let id = { object.lock().id };
+        let index = self.objects.len();
+        match self.object_indices.entry(id) {
+            hash_map::Entry::Occupied(_) => panic!("object was already in the list"),
+            hash_map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(index);
+            }
+        }
+        self.objects.push(Some(object.clone()));
+    }
+
+    /// Removes an object from the list of objects for rendering.
+    ///
+    /// # Panics
+    ///
+    /// - if object wasn't in the list
+    pub fn remove_object(&mut self, object: &ObjectRef) {
+        let object_id = { object.lock().id };
+        let &index = self
+            .object_indices
+            .get(&object_id)
+            .unwrap_or_else(|| panic!("object wasn't in the list"));
+        self.objects[index] = None;
+    }
+
+    fn objects(&self) -> impl Iterator<Item = impl DerefMut<Target = ObjectStorage>> {
+        self.objects
+            .iter()
+            .filter_map(Option::as_ref)
+            .map(ObjectRef::lock)
     }
 
     /// Renders the scene onto the surface with a camera.
@@ -349,18 +333,20 @@ impl Scene {
 
         render_pass.set_bind_group(0, &self.camera_wgpu_bind_group, &[]);
 
-        for object in &self.object_registry {
-            // These 3 lines are delibrately placed before the `is_hidden` check to make sure that,
-            // had an invalid ID be produced, the panic site is closer to the source.
-            let mesh = self.mesh(object.mesh_id);
-            let material = self.material(object.material_id);
-            let camera = self.camera(object.camera_id);
-
+        for object in self.objects() {
+            let camera = object.camera.lock();
+            let mesh = object.mesh.lock();
+            let material = object.material.lock();
             if object.is_hidden {
                 continue;
             }
 
-            self.update_projection_uniform(surface.size_f32(), camera, queue);
+            // Updates projection uniform.
+            let projection = camera.projection_matrix(surface.size_f32());
+            self.camera_bind_group
+                .projection
+                .write(projection.into(), queue);
+
             if let Some(model_view_uniform) = mesh.instance.model_view() {
                 let model_view = camera.view_matrix() * object.model;
                 let model_view_array: [[f32; 4]; 4] = model_view.into();
@@ -381,13 +367,14 @@ impl Scene {
     /// Set the model matrix for an object's mesh.
     /// NOP for objects that doesn't use traditional model-view matrix (object with a mesh that
     /// returns `None` for `AsMesh::model_view`).
-    pub fn set_object_model(&mut self, object_id: ObjectId, model: Matrix4<f32>) {
-        let object = self.object_mut(object_id);
+    pub fn set_object_model(&self, object: &ObjectRef, model: Matrix4<f32>) {
+        let mut object = object.lock();
         object.model = model;
     }
 
     /// Set whether an object is hidden.
-    pub fn set_object_is_hidden(&mut self, object_id: ObjectId, is_hidden: bool) {
-        self.object_mut(object_id).is_hidden = is_hidden;
+    pub fn set_object_is_hidden(&self, object: &ObjectRef, is_hidden: bool) {
+        let mut object = object.lock();
+        object.is_hidden = is_hidden;
     }
 }

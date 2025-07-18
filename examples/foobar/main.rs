@@ -79,7 +79,7 @@ struct State {
     window: Arc<Window>,
     window_surface: WindowSurface,
     scene: Scene,
-    camera: CameraId,
+    camera: CameraRef,
 }
 
 impl State {
@@ -102,7 +102,7 @@ impl State {
             window_surface.depth_stencil_format(),
         );
 
-        let camera = scene.add_camera(Camera::new(
+        let camera = scene.create_camera(Camera::new(
             point3(0.0, 180.0, 0.0),
             vec3(0.0, 1.0, 0.0),
             CameraDirection::LookAt(point3(0.0, 180.0, 0.0)),
@@ -111,14 +111,14 @@ impl State {
             1000.0,
         ));
 
-        let cube_0_material = scene.add_material(&device, &{
+        let cube_0_material = scene.create_material(&device, &{
             let material = materials::UniformFill::create(&device);
             material
                 .fill_color
                 .write(Rgba::new(0.7, 0.4, 1.0, 1.0), &queue);
             material
         });
-        let cube_0_mesh = scene.add_mesh(
+        let cube_0_mesh = scene.create_mesh(
             &device,
             Arc::new(meshes::Mesh3D::create(
                 &device,
@@ -126,7 +126,7 @@ impl State {
                 &CUBE_INDICIES,
             )),
         );
-        let cube_0 = scene.add_object(&device, camera, cube_0_mesh, cube_0_material);
+        let cube_0 = scene.create_object(&device, camera.clone(), cube_0_mesh, cube_0_material);
 
         let image = test_image();
         let texture = Texture2d::create_init(
@@ -136,7 +136,7 @@ impl State {
             image.format,
             image.data.as_ref(),
         );
-        let cube_1_material = scene.add_material(&device, &{
+        let cube_1_material = scene.create_material(&device, &{
             materials::Textured::create(
                 texture.view(Default::default()),
                 Sampler::create(
@@ -147,26 +147,32 @@ impl State {
                 ),
             )
         });
-        let cube_1_mesh = scene.add_mesh(
+        let cube_1_mesh = scene.create_mesh(
             &device,
-            Arc::new(meshes::Mesh3D::create(&device, &CUBE_VERTICES, &CUBE_INDICIES)),
+            Arc::new(meshes::Mesh3D::create(
+                &device,
+                &CUBE_VERTICES,
+                &CUBE_INDICIES,
+            )),
         );
-        let cube_1 = scene.add_object(&device, camera, cube_1_mesh, cube_1_material);
+        let cube_1 = scene.create_object(&device, camera.clone(), cube_1_mesh, cube_1_material);
 
-        let ground_material = scene.add_material(&device, &{
+        let ground_material = scene.create_material(&device, &{
             let material = materials::SdfCircle::create(&device);
             material
                 .fill_color
                 .write(Rgba::new(0.5, 0.5, 0.5, 1.0), &queue);
             material
         });
-        let ground_mesh = scene.add_mesh(&device, Arc::new(meshes::Quad::create(&device)));
-        let ground = scene.add_object(&device, camera, ground_mesh, ground_material);
+        let ground_mesh = scene.create_mesh(&device, Arc::new(meshes::Quad::create(&device)));
+        let ground = scene.create_object(&device, camera.clone(), ground_mesh, ground_material);
+
+        // Set model matrices.
 
         // Ground.
-        let camera_far = scene.camera(camera).far;
+        let camera_far = camera.with_mut(|camera| camera.far);
         scene.set_object_model(
-            ground,
+            &ground,
             Matrix4::from_scale(camera_far * 2.0)
                 * Matrix4::from_translation(vec3(-0.5, 0.0, -0.5))
                 * Matrix4::from_angle_x(Deg(90.0)),
@@ -175,7 +181,7 @@ impl State {
         // Cube 0.
         let cube_0_size = 100.0;
         scene.set_object_model(
-            cube_0,
+            &cube_0,
             Matrix4::from_translation(vec3(-120.0, cube_0_size + 100.0, 0.0))
                 * Matrix4::from_angle_x(Deg(45.0))
                 * Matrix4::from_angle_y(Deg(30.0))
@@ -186,7 +192,7 @@ impl State {
         // Cube 1.
         let cube_1_size = 80.0;
         scene.set_object_model(
-            cube_1,
+            &cube_1,
             Matrix4::from_translation(vec3(120.0, cube_1_size + 80.0, 0.0))
                 * Matrix4::from_angle_x(Deg(-12.0))
                 * Matrix4::from_angle_z(Deg(40.0))
@@ -218,9 +224,10 @@ impl State {
             .unwrap()
             .as_secs_f64();
         // Update camera position.
-        self.scene.camera_mut(self.camera).position.x = (f64::cos(t) as f32) * 400.0;
-        self.scene.camera_mut(self.camera).position.z = (f64::sin(t) as f32) * 400.0;
-
+        self.camera.with_mut(|camera| {
+            camera.position.x = (f64::cos(t) as f32) * 400.0;
+            camera.position.z = (f64::sin(t) as f32) * 400.0;
+        });
         self.window_surface.frame(|surface| {
             self.scene.render(&self.device, &self.queue, &surface);
         });
