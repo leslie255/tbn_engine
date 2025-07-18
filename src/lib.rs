@@ -29,3 +29,4 @@ pub use surface::*;
 pub use texture::*;
 
 pub use obj;
+pub use cgmath;
