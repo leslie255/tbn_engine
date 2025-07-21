@@ -74,8 +74,7 @@ const CUBE_INDICIES: [u32; 36] = [
 ];
 
 struct State {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    context: Context,
     window: Arc<Window>,
     window_surface: WindowSurface,
     scene: Scene,
@@ -96,13 +95,15 @@ impl State {
 
         let window_surface = WindowSurface::new(Arc::clone(&window), &instance, &adapter, &device);
 
+        let context = Context::new(device, queue);
+
         let mut scene = Scene::new(
-            &device,
+            context.wgpu_device(),
             window_surface.format(),
             window_surface.depth_stencil_format(),
         );
 
-        let camera = scene.create_camera(Camera::new(
+        let camera = context.create_camera(Camera::new(
             point3(0.0, 180.0, 0.0),
             vec3(0.0, 1.0, 0.0),
             CameraDirection::LookAt(point3(0.0, 180.0, 0.0)),
@@ -111,61 +112,41 @@ impl State {
             1000.0,
         ));
 
-        let cube_0_material = scene.create_material(&device, &{
-            let material = materials::UniformFill::create(&device);
-            material
-                .fill_color
-                .write(Rgba::new(0.7, 0.4, 1.0, 1.0), &queue);
-            material
+        let cube_0_material = context.create_material(&{
+            materials::UniformFill::create(&context, Rgba::new(0.7, 0.4, 1.0, 1.0))
         });
-        let cube_0_mesh = scene.create_mesh(
-            &device,
-            Arc::new(meshes::Mesh3D::create(
-                &device,
-                &CUBE_VERTICES,
-                &CUBE_INDICIES,
-            )),
-        );
-        let cube_0 = scene.create_object(&device, camera.clone(), cube_0_mesh, cube_0_material);
+        let cube_0_mesh = context.create_mesh(Arc::new({
+            meshes::Mesh3D::create(&context, &CUBE_VERTICES, &CUBE_INDICIES)
+        }));
+        let cube_0 = context.create_object(&scene, camera.clone(), cube_0_mesh, cube_0_material);
+        scene.add_object(cube_0.clone());
 
         let image = test_image();
-        let texture = Texture2d::create_init(
-            &device,
-            &queue,
-            image.size,
-            image.format,
-            image.data.as_ref(),
-        );
-        let cube_1_material = scene.create_material(&device, &{
+        let texture =
+            Texture2d::create_init(&context, image.size, image.format, image.data.as_ref());
+        let cube_1_material = context.create_material(&{
             materials::Textured::create(
                 texture.view(Default::default()),
                 Sampler::create(
-                    &device,
+                    &context,
                     wgpu::AddressMode::ClampToEdge,
                     wgpu::FilterMode::Linear,
                     wgpu::FilterMode::Linear,
                 ),
             )
         });
-        let cube_1_mesh = scene.create_mesh(
-            &device,
-            Arc::new(meshes::Mesh3D::create(
-                &device,
-                &CUBE_VERTICES,
-                &CUBE_INDICIES,
-            )),
-        );
-        let cube_1 = scene.create_object(&device, camera.clone(), cube_1_mesh, cube_1_material);
+        let cube_1_mesh = context.create_mesh(Arc::new({
+            meshes::Mesh3D::create(&context, &CUBE_VERTICES, &CUBE_INDICIES)
+        }));
+        let cube_1 = context.create_object(&scene, camera.clone(), cube_1_mesh, cube_1_material);
+        scene.add_object(cube_1.clone());
 
-        let ground_material = scene.create_material(&device, &{
-            let material = materials::SdfCircle::create(&device);
-            material
-                .fill_color
-                .write(Rgba::new(0.5, 0.5, 0.5, 1.0), &queue);
-            material
+        let ground_material = context.create_material(&{
+            materials::SdfCircle::create(&context, Rgba::new(0.5, 0.5, 0.5, 1.0))
         });
-        let ground_mesh = scene.create_mesh(&device, Arc::new(meshes::Quad::create(&device)));
-        let ground = scene.create_object(&device, camera.clone(), ground_mesh, ground_material);
+        let ground_mesh = context.create_mesh(Arc::new(meshes::Quad::create(&context)));
+        let ground = context.create_object(&scene, camera.clone(), ground_mesh, ground_material);
+        scene.add_object(ground.clone());
 
         // Set model matrices.
 
@@ -201,9 +182,8 @@ impl State {
         );
 
         State {
+            context,
             window,
-            device,
-            queue,
             window_surface,
             scene,
             camera,
@@ -215,7 +195,8 @@ impl State {
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        self.window_surface.resized(new_size, &self.device);
+        self.window_surface
+            .resized(new_size, self.context.wgpu_device());
     }
 
     fn render(&mut self) {
@@ -229,7 +210,7 @@ impl State {
             camera.position.z = (f64::sin(t) as f32) * 400.0;
         });
         self.window_surface.frame(|surface| {
-            self.scene.render(&self.device, &self.queue, &surface);
+            self.scene.render(&self.context, &surface);
         });
     }
 }

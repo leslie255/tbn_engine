@@ -7,6 +7,8 @@ pub(crate) mod buffers;
 pub(crate) mod camera;
 /// Contains data structures for colors.
 pub(crate) mod color;
+/// Contains the `Context`.
+pub(crate) mod context;
 /// Contains the `AsMaterial` trait and various materials.
 pub(crate) mod material;
 /// Contains the `AsMesh` trait and various meshes.
@@ -27,6 +29,7 @@ pub use mesh::*;
 pub use scene::*;
 pub use surface::*;
 pub use texture::*;
+pub use context::*;
 
-pub use obj;
 pub use cgmath;
+pub use obj;

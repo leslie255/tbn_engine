@@ -1,7 +1,7 @@
 use cgmath::*;
 use wgpu::{ShaderStages, TextureUsages, util::DeviceExt as _};
 
-use crate::Bindable;
+use crate::{Bindable, Context};
 
 /// A trait that `TextureFormat`, `DepthStencilTextureFormat`, and `wgpu::TextureFormat` all implements.
 /// This is for easier code reuse for texture and texture view structs.
@@ -329,13 +329,7 @@ impl<Format: TextureFormatTrait> Texture2d_<Format> {
     }
 
     /// Creates a 2D texture of usage (COPY_DST | TEXTURE_BINDING) and then initialize it with data.
-    pub fn create_init(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        size: Vector2<u32>,
-        format: Format,
-        data: &[u8],
-    ) -> Self {
+    pub fn create_init(context: &Context, size: Vector2<u32>, format: Format, data: &[u8]) -> Self {
         let usage = TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING;
         let descriptor = wgpu::TextureDescriptor {
             label: None,
@@ -347,8 +341,12 @@ impl<Format: TextureFormatTrait> Texture2d_<Format> {
             usage,
             view_formats: &[],
         };
-        let wgpu_texture =
-            device.create_texture_with_data(queue, &descriptor, Default::default(), data);
+        let wgpu_texture = context.wgpu_device().create_texture_with_data(
+            context.wgpu_queue(),
+            &descriptor,
+            Default::default(),
+            data,
+        );
         Self {
             wgpu_texture,
             format,
@@ -491,12 +489,12 @@ pub struct Sampler {
 
 impl Sampler {
     pub fn create(
-        device: &wgpu::Device,
+        context: &Context,
         address_mode: wgpu::AddressMode,
         mag_filter: wgpu::FilterMode,
         min_filter: wgpu::FilterMode,
     ) -> Self {
-        let wgpu_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let wgpu_sampler = context.wgpu_device().create_sampler(&wgpu::SamplerDescriptor {
             label: None,
             address_mode_u: address_mode,
             address_mode_v: address_mode,

@@ -54,6 +54,8 @@ impl<T: AsMesh> DynMesh for T {
 }
 
 pub mod meshes {
+    use crate::Context;
+
     use super::*;
 
     /// A simple quad shape.
@@ -119,12 +121,12 @@ pub mod meshes {
 
         const INDICES: [u16; 6] = [0, 1, 3, 0, 2, 3];
 
-        pub fn create(device: &wgpu::Device) -> Self {
+        pub fn create(context: &Context) -> Self {
             Self {
-                vertex_buffer: VertexBuffer::create_init(device, &Self::VERTICES),
-                index_buffer: IndexBuffer::create_init(device, &Self::INDICES),
-                model_view: UniformBuffer::create_init(device, Matrix4::identity().into()),
-                uv_transform: UniformBuffer::create_init(device, Matrix4::identity().into()),
+                vertex_buffer: VertexBuffer::create_init(context.wgpu_device(), &Self::VERTICES),
+                index_buffer: IndexBuffer::create_init(context.wgpu_device(), &Self::INDICES),
+                model_view: UniformBuffer::create_init(context.wgpu_device(), Matrix4::identity().into()),
+                uv_transform: UniformBuffer::create_init(context.wgpu_device(), Matrix4::identity().into()),
             }
         }
     }
@@ -144,11 +146,11 @@ pub mod meshes {
     }
 
     impl Mesh3D {
-        pub fn create(device: &wgpu::Device, vertices: &[Vertex3dUV], indices: &[u32]) -> Self {
+        pub fn create(context: &Context, vertices: &[Vertex3dUV], indices: &[u32]) -> Self {
             Self {
-                vertex_buffer: VertexBuffer::create_init(device, vertices),
-                index_buffer: IndexBuffer::create_init(device, indices),
-                model_view: UniformBuffer::create_init(device, Matrix4::identity().into()),
+                vertex_buffer: VertexBuffer::create_init(context.wgpu_device(), vertices),
+                index_buffer: IndexBuffer::create_init(context.wgpu_device(), indices),
+                model_view: UniformBuffer::create_init(context.wgpu_device(), Matrix4::identity().into()),
             }
         }
     }

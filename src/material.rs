@@ -1,10 +1,9 @@
-use crate::{impl_as_bind_group, AsBindGroup, Rgba, Sampler, TextureFormat, UniformBuffer};
+use crate::{AsBindGroup, Rgba, Sampler, UniformBuffer, impl_as_bind_group};
 
 pub trait AsMaterial: AsBindGroup {
     fn create_fragment_shader(device: &wgpu::Device) -> wgpu::ShaderModule;
 
-    fn blend_state(surface_format: TextureFormat) -> Option<wgpu::BlendState> {
-        _ = surface_format;
+    fn blend_state() -> Option<wgpu::BlendState> {
         Some(wgpu::BlendState {
             color: wgpu::BlendComponent {
                 operation: wgpu::BlendOperation::Add,
@@ -17,7 +16,7 @@ pub trait AsMaterial: AsBindGroup {
 }
 
 pub mod materials {
-    use crate::TextureView2d;
+    use crate::{Context, TextureView2d};
 
     use super::*;
 
@@ -33,9 +32,9 @@ pub mod materials {
     }
 
     impl UniformFill {
-        pub fn create(device: &wgpu::Device) -> Self {
+        pub fn create(context: &Context, color: Rgba) -> Self {
             Self {
-                fill_color: UniformBuffer::create_init(device, [1.0; 4].into()),
+                fill_color: UniformBuffer::create_init(context.wgpu_device(), color),
             }
         }
     }
@@ -69,11 +68,11 @@ pub mod materials {
     }
 
     impl SdfCircle {
-        pub fn create(device: &wgpu::Device) -> Self {
+        pub fn create(context: &Context, fill_color: Rgba) -> Self {
             Self {
-                fill_color: UniformBuffer::create_init(device, [1.0; 4].into()),
-                center: UniformBuffer::create_init(device, [0.5; 2]),
-                radius: UniformBuffer::create_init(device, 0.5),
+                fill_color: UniformBuffer::create_init(context.wgpu_device(), fill_color),
+                center: UniformBuffer::create_init(context.wgpu_device(), [0.5; 2]),
+                radius: UniformBuffer::create_init(context.wgpu_device(), 0.5),
             }
         }
     }
