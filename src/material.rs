@@ -1,4 +1,4 @@
-use crate::{AsBindGroup, Rgba, Sampler, UniformBuffer, impl_as_bind_group};
+use crate::{binding, impl_as_bind_group, AsBindGroup, Rgba, Sampler, UniformBuffer};
 
 pub trait AsMaterial: AsBindGroup {
     fn create_fragment_shader(device: &wgpu::Device) -> wgpu::ShaderModule;
@@ -129,3 +129,28 @@ pub mod materials {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct MaterialStorage {
+    pub(crate) fragment_shader: wgpu::ShaderModule,
+    pub(crate) wgpu_bind_group: wgpu::BindGroup,
+    pub(crate) bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) blend_state: Option<wgpu::BlendState>,
+}
+
+impl MaterialStorage {
+    pub(crate) fn new<Material: AsMaterial>(
+        device: &wgpu::Device,
+        material_instance: &Material,
+    ) -> Self {
+        let (wgpu_bind_group, bind_group_layout) =
+            binding::create_wgpu_bind_group(device, material_instance);
+        Self {
+            fragment_shader: Material::create_fragment_shader(device),
+            wgpu_bind_group,
+            bind_group_layout,
+            blend_state: Material::blend_state(),
+        }
+    }
+}
+

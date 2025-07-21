@@ -1,91 +1,15 @@
 use std::{
     collections::{HashMap, hash_map},
-    fmt::{self, Debug},
-    ops::{Deref, DerefMut},
-    sync::Arc,
+    fmt::Debug,
+    ops::DerefMut,
 };
 
 use cgmath::*;
 
 use crate::{
-    AsMaterial, AsMesh, CameraBindGroup, CameraRef, Context, DepthStencilTextureFormat, DynMesh,
-    MaterialRef, MeshRef, ObjectRef, SurfaceView, TextureFormat, binding,
+    CameraBindGroup, CameraRef, Context, DepthStencilTextureFormat, MaterialRef, MeshRef,
+    ObjectRef, SurfaceView, TextureFormat, binding,
 };
-
-#[derive(Clone)]
-pub(crate) struct MeshStorage {
-    pub(crate) instance: Arc<dyn DynMesh>,
-    pub(crate) vertex_shader: wgpu::ShaderModule,
-    pub(crate) wgpu_bind_group: wgpu::BindGroup,
-    pub(crate) bind_group_layout: wgpu::BindGroupLayout,
-    pub(crate) vertex_buffer_layout: wgpu::VertexBufferLayout<'static>,
-    pub(crate) index_format: wgpu::IndexFormat,
-}
-
-impl Debug for MeshStorage {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter
-            .debug_struct("MeshStorage")
-            .field("vertex_shader", &self.vertex_shader)
-            .field("wgpu_bind_group", &self.wgpu_bind_group)
-            .field("bind_group_layout", &self.bind_group_layout)
-            .field("vertex_buffer_layout", &self.vertex_buffer_layout)
-            .finish_non_exhaustive()
-    }
-}
-
-impl MeshStorage {
-    pub(crate) fn new<Mesh: AsMesh>(device: &wgpu::Device, mesh_instance: Arc<Mesh>) -> Self {
-        let (wgpu_bind_group, bind_group_layout) =
-            binding::create_wgpu_bind_group(device, Arc::deref(&mesh_instance));
-        let vertex_buffer_layout = mesh_instance.vertex_buffer().layout();
-        let index_format = mesh_instance.index_buffer().index_format();
-        Self {
-            instance: mesh_instance.as_arc_dyn(),
-            vertex_shader: Mesh::create_vertex_shader(device),
-            wgpu_bind_group,
-            bind_group_layout,
-            vertex_buffer_layout,
-            index_format,
-        }
-    }
-
-    pub(crate) fn vertex_buffer(&self) -> &wgpu::Buffer {
-        self.instance.vertex_buffer()
-    }
-
-    pub(crate) fn index_buffer(&self) -> &wgpu::Buffer {
-        self.instance.index_buffer()
-    }
-
-    pub(crate) fn index_buffer_length(&self) -> u32 {
-        self.instance.index_buffer_length()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct MaterialStorage {
-    pub(crate) fragment_shader: wgpu::ShaderModule,
-    pub(crate) wgpu_bind_group: wgpu::BindGroup,
-    pub(crate) bind_group_layout: wgpu::BindGroupLayout,
-    pub(crate) blend_state: Option<wgpu::BlendState>,
-}
-
-impl MaterialStorage {
-    pub(crate) fn new<Material: AsMaterial>(
-        device: &wgpu::Device,
-        material_instance: &Material,
-    ) -> Self {
-        let (wgpu_bind_group, bind_group_layout) =
-            binding::create_wgpu_bind_group(device, material_instance);
-        Self {
-            fragment_shader: Material::create_fragment_shader(device),
-            wgpu_bind_group,
-            bind_group_layout,
-            blend_state: Material::blend_state(),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ObjectStorage {
